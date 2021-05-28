@@ -15,8 +15,8 @@ import random
 
 
 headers = {
-    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.116 '
-                  'Safari/537.36 QBCore/4.0.1301.400 QQBrowser/9.0.2524.400 Mozilla/5.0 (Windows NT 6.1; WOW64) '
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.116 '
+                  'Chrome/88.0.4324.104 Safari/537.36 QBCore/4.0.1301.400 QQBrowser/9.0.2524.400 Mozilla/5.0 (Windows 10.0; Win64; x64) '
                   'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2875.116 Safari/537.36 NetType/WIFI '
                   'MicroMessenger/7.0.5 WindowsWechat '
 }
@@ -27,7 +27,7 @@ class WechatSpider:
     一次爬取页数有限制，目前最多一次爬取了70页
     超过限制会返回freq control的错误信息，需要停一会才能继续"""
 
-    def __init__(self, user, pwd, biz, is_continue=False):
+    def __init__(self, user, pwd, biz, table, is_continue=False):
         """
         :param user:  公众号账号
         :param pwd:   登录密码
@@ -37,6 +37,8 @@ class WechatSpider:
         self.user = user
         self.pwd = pwd
         self.biz = biz
+        self.table = table
+        self.is_continue = is_continue
 
         # 初始化代理ip
         self.proxy = ProxySpider()
@@ -44,7 +46,7 @@ class WechatSpider:
 
         # 随机选择一个ip地址
         self.using_proxy = self.proxy.random_https_proxy()
-        # print('inited proxy:', self.proxy.https_proxies)
+        #print('inited proxy:', self.proxy.https_proxies)
 
         # 初始化cookie和token，有时效
         self.cookie = self.get_cookie()
@@ -118,7 +120,7 @@ class WechatSpider:
         # 点击登录之后需要扫码验证身份
         print('请扫码')
         try:
-            WebDriverWait(driver, 20).until(
+            WebDriverWait(driver, 60).until(
                 EC.presence_of_element_located((By.CLASS_NAME, 'weui-desktop-account__info'))
             )
         except Exception as e:
@@ -155,6 +157,7 @@ class WechatSpider:
         """
 
         print('token proxy:', self.using_proxy)
+        #print(index_url,headers)
         try:
             token_response = requests.get(index_url, headers=headers, cookies=self.cookie,
                                           proxies=self.using_proxy, timeout=30)
@@ -166,13 +169,13 @@ class WechatSpider:
                 self.proxy.update_proxies(self.using_proxy['https'])
                 self.using_proxy = self.proxy.random_https_proxy()
                 # 避免太频繁请求被封
-                time.sleep(random.randint(2, 5))
+                time.sleep(random.randint(2, 10))
                 return self.get_token(retry_times)
             else:
                 return 0
         # print(token_response.url)
         else:
-            # print(token_response.url)
+            print(token_response.url)
             token = re.findall(r'&token=(\d+)', str(token_response.url), re.S)[0]
             return token
 
@@ -281,7 +284,7 @@ class WechatSpider:
             if retry_times < 6:
                 self.proxy.update_proxies(self.using_proxy['https'])
                 self.using_proxy = self.proxy.random_https_proxy()
-                time.sleep(random.randint(2, 5))
+                time.sleep(random.randint(2, 10))
                 return self.get_paper_count(search_response=search_res, retry_times=retry_times)
             else:
                 print('文章数获取失败，请稍后再试')
@@ -307,13 +310,15 @@ class WechatSpider:
         :param retry_times: 重试次数
         """
 
+        success = 1
+
         # 第一次调用的时候，调用get_paper_count获取推送数
         if not page_num:
             paper_count = self.get_paper_count()
             if not paper_count:
                 print('需爬取文章数获取失败，请稍后再试')
                 return None
-            print(paper_count)
+            print('paper_count: ', paper_count)
             # 每页5个推送，算出页数
             clawing_pages = paper_count // 5 + 1 - self.clawed_page + 1
             # self.paper_params['begin'] = '0'
@@ -332,6 +337,7 @@ class WechatSpider:
                 response = requests.get(paper_list_url, headers=paper_header, cookies=self.get_cookie(),
                                         params=self.paper_params, proxies=self.using_proxy,
                                         timeout=30).json()
+                #print('header: ',paper_header)
             except Exception as e:
                 print(e)
                 retry_times += 1
@@ -356,6 +362,7 @@ class WechatSpider:
                     # 请求次数过多的时候就会返回这个错误
                     if response['base_resp']['err_msg'] == 'freq control':
                         print('爬得太频繁了，先歇会')
+                        success = 0
                         break
 
                     # token过期了
@@ -390,17 +397,19 @@ class WechatSpider:
                         # 做一次查重校验，用文章标题来判断这篇文章是不是已经爬过了
                         if not save_redis(double_check_info):
                             print(double_check_info['paper'], '已经爬过了')
+                            #save_biz_paper(saving_info,self.table)
                             continue
 
                         # 没有爬过的就入库
-                        save_result = save_biz_paper(saving_info)
+                        save_result = save_biz_paper(saving_info,self.table)
                         if save_result == 1:
                             print('文章：', saving_info['app_msg_title'] + '保存成功')
                         else:
                             del_redis_ele(saving_info)
                             print('文章：', saving_info['app_msg_title'] + '保存失败')
+                            continue
 
-                        # print(saving_info)
+                        print("saving_info: ",saving_info)
                         # self.get_paper_detail(app_msg['link'])
                     # 每页爬完之后都把重试次数重置
                     retry_times = 0
@@ -427,6 +436,129 @@ class WechatSpider:
                     self.proxy_claw_page = 0
 
             time.sleep(random.randint(5, 15))
-        print(self.biz + '文章爬取完毕')
+        if success == 1:
+            print(self.biz + '文章爬取完毕或发生了中断，请根据页数确认')
+
+    def get_new_paper(self, clawing_pages = 3, retry_times=0): #一次最多更新最近的前30篇推送
+        """调用文章查询接口获取最新更新的文章
+        :param retry_times: 重试次数c
+        """
+
+        success = 1
+
+        # 构造headers
+        refer = self.build_refer()
+        paper_header = headers
+        paper_header['refer'] = refer
+
+        search_res = self.get_biz()
+        if search_res == 0:
+            print('公众号获取失败，请稍后再试')
+            return
+        if isinstance(search_res, str):
+            print('公众号获取结果：', search_res)
+            return
+        print(search_res)
+
+        # 提取fakeid
+        fakeid = search_res['fakeid']
+        # self.paper_params['token'] = str(self.token)
+
+        # fakeid更新到params中
+        self.paper_params['fakeid'] = fakeid
+
+        print('clawing_pages', clawing_pages)
+        
+        while clawing_pages > 0:
+            # retry_times = 0
+            print('new_paper proxy:', self.using_proxy)
+            #print(self.paper_params)
+            try:
+                response = requests.get(paper_list_url, headers=paper_header, cookies=self.get_cookie(),
+                                        params=self.paper_params, proxies=self.using_proxy,
+                                        timeout=30).json()
+                #print("response: ",response)
+            except Exception as e:
+                print(e)
+                retry_times += 1
+                if retry_times < 6:
+                    self.proxy.update_proxies(self.using_proxy['https'])
+                    self.using_proxy = self.proxy.random_https_proxy()
+                    time.sleep(random.randint(3, 10))
+                    return self.get_new_paper(clawing_pages, retry_times)
+                else:
+                    print(f'第{int(self.paper_params["begin"]) // 5}页获取失败，请稍后再试')
+                    # 重试次数超过6次的时候也要更换代理，以便下一页爬取
+                    """self.proxy.update_proxies(self.using_proxy['https'])
+                    self.using_proxy = self.proxy.random_https_proxy()
+                    continue"""
+                    break
+            else:
+                try:
+                    # 文章信息在这里
+                    app_msg_list = response['app_msg_list']
+                except KeyError:
+                    # print('keyError', response)
+                    # 请求次数过多的时候就会返回这个错误
+                    if response['base_resp']['err_msg'] == 'freq control':
+                        print('爬得太频繁了，先歇会')
+                        success = 0
+                        break
+
+                    # token过期了
+                    elif response['base_resp']['err_msg'] == 'invalid csrf token':
+                        new_token = self.get_token()
+                        if new_token != 0:
+                            self.paper_params['token'] = str(new_token)
+                        else:
+                            print('token重新获取失败')
+                            break
+                    else:
+                        print('keyError', response)
+                else:
+                    for app_msg in app_msg_list:
+                        # 从每个文章信息里提取需要的数据
+                        saving_info = {
+                            'aid': str(app_msg['aid']),  # mid_idx
+                            'biz_name': self.biz,
+                            'app_msg_id': str(app_msg['appmsgid']),   # 文章链接中的mid
+                            'msg_create_time': datetime.datetime.fromtimestamp(int(app_msg['create_time'])
+                                                                               ).strftime('%Y-%m-%d %H:%M:%S'),
+                            'app_msg_digest': app_msg['digest'],
+                            'app_msg_url': app_msg['link'],
+                            'app_msg_title': app_msg['title'],
+                        }
+                        double_check_info = {
+                            'type': 'double',
+                            'biz': self.biz,
+                            'paper': saving_info['app_msg_title']
+                        }
+
+                        # 做一次查重校验，用文章标题来判断这篇文章是不是已经爬过了
+                        if not save_redis(double_check_info):
+                            print(double_check_info['biz'], double_check_info['paper'], '已经到达爬过了的文章,更新完毕！')
+                            #return
+
+                        # 没有爬过的就入库
+                        save_result = save_biz_paper(saving_info,self.table)
+                        if save_result == 1:
+                            print('文章：', saving_info['app_msg_title'] + '保存成功')
+                        else:
+                            del_redis_ele(saving_info)
+                            print('文章：', saving_info['app_msg_title'] + '保存失败')
+                            continue
+
+                        print("saving_info: ",saving_info)
+                        # self.get_paper_detail(app_msg['link'])
+                    # 每页爬完之后都把重试次数重置
+                    retry_times = 0
+
+                # 需要爬的次数和开始位置变更
+                clawing_pages -= 1
+                self.paper_params['begin'] = str(int(self.paper_params['begin']) + 5)
+
+            time.sleep(random.randint(5, 15))
+        if success == 1:
+            print(self.biz + '文章更新完毕')
 
 

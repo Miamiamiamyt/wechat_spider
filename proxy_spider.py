@@ -17,9 +17,9 @@ class ProxySpider:
         """获取前两页的代理ip"""
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
-                          'Chrome/80.0.3987.106 Safari/537.36',
+                          'Safari/537.36 Chrome/88.0.4324.104',
         }
-        for page in range(1, 3):
+        for page in range(1, 10):
             url = 'http://www.xiladaili.com/gaoni/%d' % page
             try:
                 response = requests.get(url=url, headers=headers)
@@ -69,6 +69,8 @@ class ProxySpider:
 
     def random_http_proxy(self):
         """只返回一个http代理"""
+        if not self.http_proxies:
+            return None
         http_proxy = random.choice(self.http_proxies)
         proxy = {
             'http': 'http://' + http_proxy,

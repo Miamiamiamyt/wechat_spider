@@ -20,31 +20,34 @@ client = redis.StrictRedis()
 
 
 def save_redis(infos):
-
     if infos['type'] == 'double':
         # info存的是文章的标题，同时做一次查重
         return client.sadd((infos['biz']+'paper').encode(), infos['paper'])
     else:
         # type = clawed
+        print("存入Redis")
         if client.exists((infos['biz']+'clawed_page').encode()):
             client.spop((infos['biz']+'clawed_page').encode())
         return client.sadd((infos['biz']+'clawed_page').encode(), infos['clawed_page'])
 
 
-def save_biz_paper(infos):
+def save_biz_paper(infos,table):
     if not infos:
         print('info为空')
         return 0
     status = 1
     try:
-        db = pymysql.connect('localhost', 'root', 'as9754826', 'wechat_biz')
+        db = pymysql.connect('localhost', 'root', '123456', 'wechat_biz')
     except Exception as e:
         status = 0
         print(e)
     else:
+        print("开始入库,进入表:",table)
+        #print("infos:",infos)
+        #print(type(infos['aid']),type(infos['biz_name']),type(infos['app_msg_id']),type(infos['msg_create_time']),type(infos['app_msg_digest']),type(infos['app_msg_url']),type(infos['app_msg_title']))
         cursor = db.cursor()
         # print(type(infos['aid']))
-        search_sql = f"select count(*) from biz where aid = '{str(infos['aid'])}'"
+        search_sql = f"select count(*) from {str(table)} where aid = '{str(infos['aid'])}'"
         # print(search_sql)
         try:
             cursor.execute(search_sql)
@@ -61,11 +64,11 @@ def save_biz_paper(infos):
                     # print('key', key)
                     keys.append(key)
                     # print('value', value)
-                    values.append('"' + value + '"')
+                    values.append("'" + value + "'")
                 key_str = ','.join(keys)
                 value_str = ','.join(values)
                 # print(value_str)
-                sql = f'insert into biz ({key_str}) values ({value_str})'
+                sql = f'replace into {str(table)} ({key_str}) values ({value_str})'
                 # print(sql)
                 try:
                     cursor.execute(sql)
@@ -76,11 +79,11 @@ def save_biz_paper(infos):
                     db.rollback()
                     status = 0
             else:
-                update_sql = f"update biz set "
+                update_sql = f"update {str(table)} set "
                 for key, value in infos.items():
                     if key != 'aid':
                         update_sql += f"{key} = '{value}',"
-                update_sql = update_sql[:-2] + f" where aid = '{infos['aid']}'"
+                update_sql = update_sql[:-1] + f" where aid = '{infos['aid']}'"
                 try:
                     cursor.execute(update_sql)
                     db.commit()
@@ -148,7 +151,7 @@ def get_article_url(biz, is_continue=False, finish_null=False):
                 sql += f' and (date_format(update_time, "%Y-%m-%d") < "{str(last_claw_date)}" '
 
     try:
-        db = pymysql.connect('localhost', 'root', 'as9754826', 'wechat_biz')
+        db = pymysql.connect('localhost', 'root', '123456', 'wechat_biz')
     except Exception as e:
         print(e)
         return 0
@@ -174,7 +177,7 @@ def save_num(aid, like_num=0, read_num=0, old_like_num=0):
     save_status = 1
     search_sql = f"select count(*) from biz where aid = '{aid}'"
     try:
-        conn = pymysql.connect('localhost', 'root', 'as9754826', 'wechat_biz')
+        conn = pymysql.connect('localhost', 'root', '123456', 'wechat_biz')
     except Exception as e:
         print(e)
         save_status = 0
@@ -229,7 +232,44 @@ def get_last_claw_date(biz):
     return str(claw_date, encoding='utf-8')
 
 
-
+def create_table(table):
+    if not table:
+        print('table名字为空')
+        return 0
+    status = 1
+    try:
+        db = pymysql.connect('localhost', 'root', '123456', 'wechat_biz')
+    except Exception as e:
+        status = 0
+        print(e)
+    else:
+        print("开始建表:",table)
+        #print(type(infos['aid']),type(infos['biz_name']),type(infos['app_msg_id']),type(infos['msg_create_time']),type(infos['app_msg_digest']),type(infos['app_msg_url']),type(infos['app_msg_title']))
+        cursor = db.cursor()
+        if table == 'biz':
+            search_sql = f"create table if not exists {str(table)} ( \
+            aid VARCHAR(100) NOT NULL, \
+            biz_name VARCHAR(100),\
+            app_msg_id VARCHAR(100),\
+            msg_create_time VARCHAR(100),\
+            app_msg_digest VARCHAR(200),\
+            app_msg_url VARCHAR(300),\
+            app_msg_title VARCHAR(100)\
+            );"
+        else:
+            search_sql = f"create table if not exists {str(table)} (like biz);"
+        #print(search_sql)
+        try:
+            cursor.execute(search_sql)
+        except Exception as e:
+            print(f'create table {table} error:', e)
+            status = 0
+        else:
+            status = 1
+        db.close()
+        if status == 1:
+            print("建表成功！")
+        return status
 
 
 
